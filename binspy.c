@@ -9,53 +9,115 @@ static int verbose_flag;
 typedef unsigned char uchar;
 
 // Pow function for integers
-// int ipow(int base, int exp)
-// {
-//     int result = 1;
-//     while (exp)
-//     {
-//         if (exp & 1)
-//             result *= base;
-//         exp >>= 1;
-//         base *= base;
-//     }
-//     return result;
-// }
+int ipow(int base, int exp)
+{
+  int result = 1;
+  while (exp)
+    {
+      if (exp & 1)
+        result *= base;
+      exp >>= 1;
+      base *= base;
+    }
+  return result;
+}
 
-// Here's another option:
+// Print a byte sequence in hex
+void print_pattern(unsigned char *pattern, int len)
+{
+  for (int i = 0; i < len; i++)
+    {
+      printf("%x ", pattern[i]);
+    }
+    puts("\n");
+}
 
-// int *mat = (int *)malloc(rows * cols * sizeof(int));
-// Then, you simulate the matrix using
+// The pattern is encoded as a long assuming that a hypothetical matrix
+// exists where all combinations are laid out sequentially. For instance,
+// the pattern (2, 4) would exist in position ((255 * 4), 4)
+unsigned long get_pattern_signature(unsigned char *pattern, int len)
+{
+    unsigned long pattern_signature = 0;
 
-// int offset = i * cols + j;
-// // now mat[offset] corresponds to m(i, j)
-// for row-major ordering and
+    for (int j = 0; j < len - 1; j++)
+      {
+        pattern_signature += (255 * ((int)pattern[j] + 1));
+      }
+    pattern_signature += (int)pattern[len - 1];
 
-// int offset = i + rows * j;
-// // not mat[offset] corresponds to m(i, j)
-// for column-major ordering.
+    printf("Pattern signature is %lu\n", pattern_signature);
 
+    return pattern_signature;
+}
+
+// Finds positions of repeated byte patterns in the given file.
+// file -- handle to the file
+// gram_len -- length of patterns to consider
+// max_matches -- number of file positions to record for each pattern
+int find_grams(FILE *file, int gram_len, int max_matches)
+{
+  // Allocate a matrix to record file positions of byte patterns. The matrix
+  // will be of length 255^gram_len and width of max_matches, with file
+  // positions recorded as longs.
+  // 255^gram_len represents all possible sequences of gram_len bytes.
+  int mat_len = ipow(255, gram_len) * max_matches;
+  unsigned long mem_size = mat_len * sizeof(unsigned long);
+  printf("Will allocate %lu bytes of memory.\n", mem_size);
+  unsigned long *positions = (unsigned long *)malloc(mem_size);
+
+  // Container for the current sequence of bytes
+  unsigned char *cur_gram = malloc(sizeof(unsigned char) * gram_len);
+
+  // Open the file and record its length
+  unsigned long fsize;
+
+  fseek(file, 0, SEEK_END);
+  fsize = ftell(file);
+  rewind(file);
+
+  printf("File size is %d bytes.\n", fsize);
+
+  for (int i = 0; i < fsize; i++)
+    {
+      // Read the current byte and shift cur_gram
+      unsigned char b;
+      fread(&b, 1, 1, file);
+
+      for (int j = 0; j < gram_len; j++)
+        {
+          cur_gram[j] = cur_gram[j + 1];
+        }
+
+      cur_gram[gram_len - 1] = b;
+
+      print_pattern(cur_gram, gram_len);
+
+      // Record file positions of patterns
+      unsigned long pattern_signature =
+        get_pattern_signature(cur_gram, gram_len);
+
+      // Add file position to the matrix
+      int observation_column = 0;
+      unsigned long prev_occurrence = positions[pattern_signature];
+      // while (prev_occurrence != 0 && observation_column < max_matches)
+      //   {
+      //     prev_occurrence = positions[pattern_signature + observation_column++];
+      //   }
+      // Have we reached max_matches?
+      // if (prev_occurrence != 0)
+      //   {
+      //     printf("Max matches reached for pattern: ");
+      //     print_pattern(cur_gram, gram_len);
+      //   }
+    }
+
+  free(positions);
+}
 
 int find_patterns(int len, char *filename)
 {
   long fsize;
   FILE *file;
-
-  // Allocate a matrix of all possible 2-byte sequences. We will use these for
-  // comparisons, and then allocate longer patterns as they are recognized.
-  int rows = 255 * 255;
-  int cols = 2;
-  uchar *mat = (uchar *)malloc(rows * cols * sizeof(uchar));
-
-  // Also, an array to mark file position where they occurred.
-  int *positions = malloc(rows * sizeof(int));
-
-  for (int i = 0; i < rows; i++)
-    {
-      mat[i*cols] = i / 255;
-      // This will repeat automatically as we surpass the capacity of a byte
-      mat[i*cols+1] = i;
-    }
 
   // Open the file and begin reading
   file = fopen(filename, "r");
@@ -65,28 +127,33 @@ int find_patterns(int len, char *filename)
       exit(1);
     }
 
-  fseek(file, 0, SEEK_END);
-  fsize = ftell(file);
-  rewind(file);
-
-  printf("File size is %d bytes.\n", fsize);
-
-  // The current bigram
-  uchar *cur_gram = malloc(sizeof(uchar)*2);
-
-  for (int i = 0; i < fsize; i++)
-    {
-      cur_gram[1] = cur_gram[0];
-      uchar b;
-      fread(&b, 1, 1, file);
-      cur_gram[0] = b;
-
-      printf("%x %x\n", cur_gram[0], cur_gram[1]);
-    }
+  find_grams(file, 4, 4);
 
   fclose(file);
-  free(mat);
 }
+
+#ifdef TESTING // Unit tests begin
+
+int main()
+{
+  printf("Let's run some tests\n");
+
+  unsigned char upper_bound_pattern[2] = { 255, 255 };
+
+  unsigned long sig = get_pattern_signature(upper_bound_pattern, 2);
+
+  // This should be the upper bound of the matrix, or 255 x 255
+  if (sig != ipow(255, 2))
+    {
+      printf("Upper bound signature should have been %lu, but got %lu\n",
+        ipow(255, 2), sig);
+      exit(1);
+    }
+}
+
+#endif // Unit tests
+
+#ifndef TESTING
 
 int main(int argc, char **argv)
 {
@@ -149,3 +216,5 @@ int main(int argc, char **argv)
 
   exit (0);
 }
+
+#endif // TESTING = false
